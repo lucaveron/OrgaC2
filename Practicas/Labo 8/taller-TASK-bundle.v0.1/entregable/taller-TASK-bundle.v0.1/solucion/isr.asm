@@ -27,6 +27,7 @@ extern tasks_tick
 extern tasks_screen_update
 extern tasks_syscall_draw
 extern tasks_input_process
+extern current_task
 
 ;; Definición de MACROS
 ;; -------------------------------------------------------------------------- ;;
@@ -206,6 +207,7 @@ _isr33:
     call pic_finish1
     ; 2. Leemos la tecla desde el teclado y la procesamos
     in al, 0x60
+    
     push eax
     call tasks_input_process
     add esp, 4
