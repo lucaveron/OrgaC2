@@ -1,0 +1,196 @@
+Ejercicio 2 - (40 puntos)
+
+Sea un sistema similar al utilizado en los talleres de la materia que ejecuta concurrentemente 4 tareas independientes. 
+El mapa de memoria virtual es el mismo para todas las tareas y cada una tiene asignado 1MB de memoria para datos. 
+La tarea con el ID 1 es una tarea maliciosa que puede “robarle” información a otras tareas utilizando el servicio CopiarPagina 
+que recibe un ID de otra tarea en EDI y una dirección de memoria virtual en ESI. Este servicio se encarga de producir una copia de 
+la página indicada por ESI de la tarea pasada por parámetro EDI en la misma página de la tarea llamadora. Es decir, que si los parámetros pasados 
+fueron ID: 3 y posición de memoria virtual: 0x7000000, al finalizar el servicio la tarea llamadora tendrá en la página indicada por la posición de 
+memoria virtual 0x7000000 una copia de lo que tenía la tarea 3 en esta dirección.
+
+a. Dibujar un esquema que muestre una posible distribución de memoria para este sistema.
+
+b. Implementar el servicio pedido. Definir para esto cualquier variable global utilizada. Indicar todo lo que se asume para resolver este ejercicio.
+
+c. Para que el servicio pedido funcione, ¿deben modificar la interrupción de reloj? Si la respuesta es sí, ¿cómo deben modificarla?. Si la respuesta es no,
+ explicar por qué.
+
+
+b) Habria que agregar una entrada en la idt para manejar la syscall al servicio, esta entrada en la idt tendria dpl = 3 . Luego esta entrada apuntaria a 
+un selector en la gdt que contendrá el selector de la rutina de atencion para la interrupcion dada por la syscall. (dpl = 0). Todo esto asumiendo que cada tarea 
+ya tiene las estructuras necesarias para su funcionamiento, desde las entradas en la gdt para su codigo y datos,  como para sus tss. 
+
+La idea del servicio es la siguiente.
+1) La tarea con el id 1 llama a la syscall en el medio de su ejecución. 
+2) En el handler de la interrupcion corroboramos que la tarea llamadora fue la 1, de ser así llamamos al servicio CopiarPagina (ASUMIMOS CURRENT TASK GLOBAL)
+3) La funcion copiarPagina se encargara de ir a buscar la pagina fisica de la direccion virtual pasada por ESI de la tarea con el id pasado por EDI.
+4) Una vez hecho esto volverá a la ejecucion normal de la tarea. 
+
+extern current_task
+global isr114
+
+
+tarea1:
+
+    mov edi, 4 
+    mov esi, 0x7000000
+    int 114
+
+_isr114: ; handler de la syscall
+    pushad
+    ;chequear si la tarea que llamo el servicio es la 1
+    cmp current_task, 1
+    jne .fin
+    
+    ;pasaje de parametros para copiar_pagina
+    push edi
+    push esi
+    call CopiarPagina
+    pop esi 
+    pop edi ; alternativamente add esp, 8
+        
+
+    .fin:
+        popad
+        iret
+
+void copiar_pagina(vaddr_t direc_a_robar, uint32_t task_id){
+
+    sched_disable_task(task_id); // punto c
+    paddr_t page_a_robar = traduccion_virtual_a_fisica(direc_a_robar, task_id);
+    paddr_t page_destino = traduccion_virtual_a_fisica(direc_a_robar, 1);
+
+    copy_page(page_destino, page_a_robar);
+    sched_task_enable(task_id); // punto c
+}
+
+paddr_t traduccion_virtual_a_fisica(vaddr_t direc_a_traducir, uint32_t task_id){
+    
+    tss_t tss_tarea = tss_tasks[task_id];
+    uint_32_t cr3_tarea = tss_tarea.cr3;
+    pd_entry_t* base = CR3_TO_PAGE_DIR(cr3_tarea);
+    pd_entry_t pd_entry = base[VIRT_PAGE_DIR(direc_a_traducir)];
+
+    pt_entry_t* pt_base = pd_entry.pt;
+    pt_entry_t pt_entry = pt_base[VIRT_PAGE_TABLE(direc_a_traducir)];
+    
+    paddr_t base_pagina_traducida = pt_entry.page; // no hace falta el offset de la fisica xq queremos copiar la pagina entera
+    
+    return base_pagina_traducida;
+}
+
+c) Podemos tener el problema de que la tarea 1 pida copiar la pagina de alguna otra tarea, pongamos de ejemplo la 2, y que a la mitad de la copia el reloj
+ interrumpa, lo cual va a causar que se retome la tarea 2. Si la tarea 2 al volver a ejecutarse modifica la parte que ya empezo a copiar la tarea 1, cuando 
+ volvamos a la tarea 1 y sigamos copiando no vamos a percibir estos cambios, lo cual va a hacer que devolvamos una pagina que esta desactualizada.
+
+ Para ello, habria que implementar un mecanismo para que al recibir una interrupcion de clock la tarea 2 se deshabilite. La solucion mas facil es cuando se llama
+ la interrupcion que roba la pagina deshabilitar la tarea victima, y al terminar de copiar la pagina volver a habilitarla. De esta forma, no nos puede pasar esto,
+ y la tarea va a robar la pagina exitosamente como nestor con las valijas. abz "Ed".
+
+
+ EL EJERCICIO DIFICIL DEL DIA = 
+
+En un sistema similar al que implementamos en los talleres del curso (modo protegido con paginación activada) se pide:
+A. Implementar la Syscall exit que al ser llamada por una tarea, inactiva dicha tarea y pone a correr la
+siguiente (segun indique el sistema de prioridad utilizado). Mostrar el código.
+B. ¿Cómo modificarías el punto anterior para que exit (además de lo que hace normalmente) guarde el ID
+de quién la llamó en el EAX de próxima tarea a ejecutar? Mostrar código.
+C. ¿Y si ahora no es la Syscall exit la que modifica el EAX de nivel 3 de la tarea que va a ser ejecutada
+luego de la llamada a la Syscall sino la interrupción de reloj? Como deberías modificar el código de la
+interrupción de reloj?. Mostrar el código y explicar todo lo que agregues al sistema.
+D. ¿Considerás que es una buena práctica que las tareas se comuniquen sobre-escribiendo los registros
+de propósito general de otra tarea? ¿Qué problemas pueden surgir? Teniendo en cuenta lo visto en la
+materia, ¿de que otra forma se podrían pasar mensajes las tareas entre sí? Hacer un esquema que
+muestre los mapeos de memoria virtual a física de dos tareas que usen la forma de comunicarse
+propuesta por ustedes.
+Realizá un diagrama que muestre la interacción del mecanismo con el scheduler y/o los mapeos de
+memoria.
+Se recomienda organizar la resolución del ejercicio realizando paso a paso los items mencionados
+anteriormente y explicar las decisiones que toman.
+
+a) Modificamos IDT, GDT etc para agregar la interrupcion.
+
+
+
+global isr137 
+
+_isr137:
+    pushad
+
+    call syscallexit
+
+    mov word [sched_task_selector], ax 
+    jmp far [sched_task_offset] 
+
+    .fin:
+        call tasks_tick
+        call tasks_screen_update
+        popad
+        iret
+
+
+uint8_t syscallexit(){
+    sched_disable_task(current_task);
+    return sched_next_task();
+}
+
+b) habria que modificar syscallexit:
+
+uint8_t syscallexit(){
+    sched_disable_task(current_task);
+
+    uint32_t next_task_id = sched_next_task();
+
+    tss_t tss_next_task = tss_tasks[next_task_id];
+    uint32_t* esp = tss_next_task.esp;
+    *(esp + OFFSET_EAX) = current_task; // current es int de 8, habria q limpiar el resto de los bits altos
+
+    return next_task_id;
+}
+
+c)
+
+uint8_t syscallexit(){
+    sched_disable_task(current_task);
+
+    uint32_t next_task_id = sched_next_task();
+
+    return next_task_id;
+}
+
+ _isr32:
+    pushad
+    call pic_finish1
+    call next_clock
+    
+    call next_task_y_pisar_eax_si_corresponde
+    cmp ax, 0 
+    je .fin 
+
+    str bx 
+    cmp ax, bx 
+    je .fin 
+
+    mov word [sched_task_selector], ax 
+    jmp far [sched_task_offset] 
+
+    .fin:
+        call tasks_tick
+        call tasks_screen_update
+        popad
+        iret
+
+uint8_t next_task_y_pisar_eax_si_corresponde(){
+    uint32_t next_task_id = sched_next_task();
+    if (shed_tasks[current-task].state == 'PAUSED'){
+        tss_t tss_next_task = tss_tasks[next_task_id];
+        uint32_t* esp = tss_next_task.esp;
+        *(esp + OFFSET_EAX) = current_task; // current es int de 8, habria q limpiar el resto de los bits altos
+    }
+    
+    return next_task_id;
+}
+
+Asumimos que cuando una tarea tiene estado Paused es porque llamo a la syscall creada "EXIT". Entonces así podriamos pisar siempre el eax de la tarea siguiente siempre que el estado de la tarea actual sea PAUSED.
+De lo contrario podríamos crear un nuevo estado en nuestro scheduler que sea "CALL_EXIT" para corroborar que esa tarea quiere que pisemos el eax de la tarea siguiente.
+
