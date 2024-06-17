@@ -1,0 +1,191 @@
+Ejercicio 1 - 2c 2023 recu
+En un sistema como el desarrollado en los talleres se desea modificar la forma en que las tareas se muestran en la pantalla. 
+En lugar de realizar la syscall draw (previamente implementada
+como int 88) se quiere que las tareas tengan acceso directo a la memoria de video:
+
+● La memoria física de video (0xB8000-0xB9FFF) es la que se refleja en la pantalla real
+● Sólo puede haber una única tarea en un determinado momento con la memoria física de
+video (0xB8000-0xB9FFF) mapeada
+● El resto de las tareas tendrá asignadas una pantalla dummy (falsa) en la región física
+(0x1E000-0x1FFFF)
+● La memoria de video de una tarea se mapeará siempre en el rango virtual
+0x08004000-0x08005FFF, independientemente si tiene acceso a la pantalla real o no
+
+Con el diseño propuesto hay una única tarea actualmente en pantalla (con acceso
+a la memoria física de video). Las tareas que no se encuentren en pantalla podrán
+escribir a las direcciones virtuales de video pero verán sus escrituras reflejadas en
+la pantalla virtual compartida (dummy).
+Soltar la tecla TAB cambiará la tarea actualmente en pantalla. Los cambios de
+tarea en pantalla se realizarán de manera cíclica (T1-T2-T3-T4-T1-T2-. . . ).
+Se solicita describir los cambios requeridos para implementar esta nueva
+característica.
+Ejercicio 1 - 2c 2023 recu - Preguntas
+a. Dibuje el esquema de memoria virtual de las tareas del nuevo sistema.
+
+b. Describa los cambios al proceso de creación de tareas (init_task_dir, create_task,
+sched_add_task, etc. . . ). Muestre código y/o pseudocódigo.
+
+c. Explique qué mecanismo usará para que el sistema sepa a qué tarea le toca el acceso a la
+pantalla.
+
+d. Describa los cambios necesarios para realizar el cambio de pantalla al soltar la tecla TAB.
+Proponga una implementación posible mostrando código y/o pseudocódigo.
+
+e. En el mecanismo propuesto las tareas no tienen forma sencilla de saber si “es su turno” de
+usar la pantalla. Proponga una solución. No se pide código ni pseudocódigo, sólo la idea.
+
+f. En el mecanismo propuesto la tarea debe redibujar toda su pantalla cuando logra
+conseguir acceso a la misma. ¿Cómo podría evitarse eso? No se pide código ni
+pseudocódigo, sólo la idea.
+
+
+Lo que hay que hacer es tener todas las tareas mapeadas a la region virtual 0x08004000-0x08005FFF y que cambie a donde apuntan esa direccion virtual.
+(0xB8000-0xB9FFF) si le toca y (0x1E000-0x1FFFF) sino.
+en el esuqema todas las tareas tienen doble mapeo, a la dummy y a la posta , cambian segun el tab(ambas en kernel)
+
+en el init task_dir habria que mapearle la region de video
+ 
+ paddr_t mmu_init_task_dir(paddr_t phy_start) {
+
+    pd_entry_t* cr3 = mmu_next_free_kernel_page(); // reservamos memoria para el page directory
+    zero_page(cr3);    
+
+    paddr_t tabla_kernel = mmu_next_free_kernel_page();
+    zero_page(tabla_kernel);
+
+    copy_page(tabla_kernel, (paddr_t) kpt);
+
+    // Definimos una copia de la kpt en la entrada 0 del directorio
+    cr3[0] = (pd_entry_t){.attrs = MMU_P | MMU_W, .pt = tabla_kernel >> 12};
+
+    // mapeamos las dos paginas de codigo como solo lectura
+    mmu_map_page(cr3, CODE_VIRTUAL_ADDR, phy_start, 0x05);
+    mmu_map_page(cr3, CODE_VIRTUAL_ADDR + PAGE_SIZE, phy_start + PAGE_SIZE, 0x05);
+
+    // mapeamos stack como r/w
+    // attrs = 0b000000000111
+    paddr_t first_free_user_page = mmu_next_free_user_page();
+    mmu_map_page(cr3, STACK_VIRTUAL_ADDR, first_free_user_page, 0x07);
+
+    // mapeamos shared como r/w 
+    mmu_map_page(cr3, SHARED_VIRTUAL_ADDR, SHARED, 0x07);
+
+
+    mmu_map_page(cr3, 0x08004000, 0x1E000, MMU_P | MMU_U | MMU_W); //inicialmente a la dummy
+    mmu_map_page(cr3, 0x08005000, 0x1F000, MMU_P | MMU_U | MMU_W); //inicialmente a la dummy
+    return cr3; // todos los atributos del CR3 en 0 PIBE
+
+}
+
+Hbaria que hacer un paralelismo entre cambio de tarea con la interrupcion de clock y cambio de tarea con interrupcion de teclado
+
+Asi como el cambio de tareas se rige con el interrupt del clock, el cambio de video se rige con la interrupcion del teclado
+
+Idea                     Scheduling de tareas      Scheduling de pantallas
+
+Tarea actual             int8_t current_task;      int8_t current_video_task;
+
+Inicializar tareas       void sched_init();        void video_init();
+
+Cambiar de tarea         int de clock (_isr32)     int de teclado (_isr33)
+                         + sched_next_task();      + swap_video_page();
+
+
+void swap_video_page(void) {
+    // Buscamos la próxima tarea viva (comenzando en la actual)
+    int next_task = (current_video_task + 1) % max_tasks;
+
+    //ahora debo mapear la current y la siguiente
+
+    tss_t* current_tss = tss_tasks[current_task_video]; current
+
+    mmu_map_page(current_tss->cr3, 0x08004000, 0x1E000, MMU_P | MMU_P| MMU_U);
+    mmu_map_page(current_tss->cr3, 0x08005000, 0x1F000, MMU_P | MMU_P| MMU_U); //mando la actual a la dummy
+
+    tss_t* next_tss = tss_tasks[next_task]; current
+
+    mmu_map_page(next_tss->cr3, 0x08004000, 0xB8000, MMU_P | MMU_P| MMU_U);
+    mmu_map_page(next_tss->cr3, 0x08005000, 0xB9000, MMU_P | MMU_P| MMU_U);
+
+    current_task = next_task;
+}
+
+la idea es que esta funcion sea llamada desde la interrupcion del teclado, pero fijandose si estoy soltando la teclat ab, y de ser asi llamar a esta funcion
+
+global _isr33
+; COMPLETAR: Implementar la rutina
+_isr33:
+    pushad
+    ; 1. Le decimos al PIC que vamos a atender la interrupción
+    call pic_finish1
+    ; 2. Leemos la tecla desde el teclado y la procesamos
+
+    cmp al, 
+
+
+    in al, 0x60 ; lee la tecla
+    push eax
+
+
+    cmp al,0x8F ; solte la tecla
+    jne .no_solte_tab
+    call swap_video_page
+
+
+
+    .no_solte_tab:
+    call tasks_input_process
+    add esp, 4
+    popad
+    iret
+
+Podriamos tener una funcion que llamamos del kernel que sería video_init() que inciialice a la primer tarea el video para ella.
+
+algo como 
+void video_init(){
+    int first_task = 0;
+    paddr_t cr3 = tss_tasks[first_task].cr3;
+    mmu_map_page(next_tss->cr3, 0x08004000, 0xB8000, MMU_P | MMU_P| MMU_U);
+    mmu_map_page(next_tss->cr3, 0x08005000, 0xB9000, MMU_P | MMU_P| MMU_U);
+
+    current_task = first_task
+
+}
+
+Podriamos agregar una syscall que devuelva en eax quien tiene actualmenmte el video, entonces seria unicamente devovler current_task cuando vuelva
+
+f) en vez de rehacer el mapeo, hacemos un copy_page de la dummy de cada tarea a la direccion de video real
+
+
+ej2 MACA)
+a) La excepcion que ocurrira es invalid Opcode pues se quiere lalmara a un opcode no existentes, esta a su vez no pushea errorCode
+b)
+SS 
+esp
+EFLAGS
+CS 
+EIP
+ ya que esto es lo que se pushea a la pila luego de pasar a nivel de privilegio 09 debido a que se provoco una interrupcion
+
+ The saved contents of CS and EIP registers point to the instruction that generated the exception.
+esto dice el manual entonces el eip va a seguir apuntando a la linea que provocó la excepcion, la que invoco al opcode invalidfo
+
+interrupcion invalid opcode
+
+_isr55:
+
+    mov ecx, [esp + offsetEip]
+    mov ecx, [ecx]
+    cmp ecx, 0x0F0B 
+    jne .no_es_rst_loop
+
+    mov ecx, 0 ; ya que no hice el pushad
+    add [esp + offsetEip], 2 ; el puntero
+    jmp .fin
+
+    .no_es_rst_loop.
+    call sched_disable_current_task
+    jmp (12 << 3):0
+
+    .fin:
+    iret

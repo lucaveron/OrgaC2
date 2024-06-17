@@ -1,0 +1,163 @@
+Primero que nada debemos elegir una convencion para pasar por parametro al servicio, debemos elegir una manera de que la tarea que llame al servicio pueda comunicarse con el
+pasandole los parametros de alguna manera. Como la tarea se ejecuta en codigo de nivel 3 y la rutina de atencion a la interrupcion en nivel 0 hay que elegir una convencion para 
+que puedan pasasrse parametros sin perderlos. Podría ser mediante registors, entonces vamos a hacer lo siguiente:
+eax = uint32_t virt
+ecx = uint32_t phy
+edx = uiny16_t task_sel, selector que apunta a un descriptor de la tss.
+
+Entonces para que fuincione este servicio vamos a asumir que ya estan definidas todas las estructuras necesarias para que funcionen todas las tareas actuales, es decir, 
+todas las entradas en la gdt de codigo,datos y tss de las tareas junto con las entradas en la idt para las interrupciones existentes. Una vez dicho esto ahora para este
+servicio debemosa gregar una entrada en la idt para atender a la interrupcion cuando una tarea quiera utilizar este servicio, mas precisamente la entrada 100 
+IDT_ENTRY3(100); Esta entrada tendrá dpl 3 para que pueda ser invocada por las tareas de nivel 3.
+Esta apuntará a una entrada de la gdt que apuntara al segmento de codigo donde inicia la rutina de atencion para esta interrupcion
+
+IDT_ENTRY3(100); entrada en la IDT
+
+la tarea que invoque este dervicio se vería algo así
+
+tarea:
+    mov eax, <virt>
+    mov ecx, <phy>
+    mov edx, <task_sel>
+    int 100
+
+
+global isr100
+    _isr100:
+
+    push edx
+    push ecx
+    push eax
+
+    call force_execute
+    add esp, 12
+
+    ;cuando vuelve hay que hjacer que el eip apunte al nuevo codigo y el stack tambien
+
+    mov [esp + offsetEip], eax ; el virt
+    mov [esp + offsetEsp], TASK_STACK_BASE_VIRTUAL 
+
+
+
+void cambio_de_codigo(vaddr_t virt, paddr_t phy, uint16_t task_sel){
+    //ahora primero tengo que hacer los mapeos necesarios.
+
+    uint32_t cr3 = rcr3();
+    uint32_t attrs = MMU_P | MMU_U | ¬MMU_W;
+    mmu_map_page(cr3, virt, phy, attrs);
+
+    //ahoira mapear la tarea pasada por parametro
+    tss_t* tss_tarea_parametro = get_tss_direction(gdt[task_sel >> 3]); //el selector de segmento tiene 3 bits para los atributos pero como queremos usarlo como indice de la gdt volamos los atributos
+    uint32_t cr3_tarea_parametro = tss_tarea_parametro->cr3;
+    mmu_map_page(cr3_tarea_parametro, virt, phy, attrs);
+
+    tss_tarea_parametro->eip = virt;
+    tss_tarea_parametro->esp = STACK_VIRTUAL_ADDR; 
+    tss_tarea_parametro->esp0 = tss_tarea_parametro->esp0 & 0XFFFFF000 + 0X1000; //al copmienzo del stacks
+}
+
+
+tss* get_tss_direction(gdt_entry_t selector){
+    uint32_t base_addr = selector.base_31_24 << 24 |
+                         selector.base_23_16 << 16 |
+                         selector.base_16_0;
+
+    return (tss*) base_addr;
+
+}
+
+
+    ------ Ejercicio 1
+
+En un sistema similar al que implementamos en los talleres del curso (modo protegido con paginación activada),
+se quiere implementar un servicio tal que cualquier tarea del sistema lo pueda invocar mediante la siguiente instrucción:
+    int 100
+
+Recibirá los siguientes parámetros (en ese orden):
+- uint32_t virt, una dirección de página virtual
+- uint32_t phy, una dirección de página física
+- uint16_t task_sel, un selector de segmento que apunta a un descriptor de TSS en la GDT.
+
+Para pasar los parámetros a este servicio, se puede escoger una convención arbitraria.
+
+El servicio en cuestión forzará la ejecución de código comenzando en la dirección física phy, mapeado en virt.
+Tanto la tarea actual como la tarea que sera pasada como parámetro (indicada por su task_sel) deben realizar la ejecucion de la pagina física en cuestión.
+Para eso, dicho servicio deberá:
+- Realizar los mapeos necesarios
+- Modificar los campos necesarios para que la tarea determinada por task_sel, retome su ejecución en la posición establecida la próxima vez que se conmute a ella.
+- Modificar los campos necesarios para que la tarea actual, retome su ejecución en la posición establecida una vez completada la llamada
+
+Se pide:
+a) Definir o modificar las estructuras de sistema necesarias para que dicho servicio pueda ser invocado
+b) Implementar dicho servicio (pseudocódigo)
+c) Dar un ejemplo de invocación de dicho servicio
+
+Detalles de implementación:
+- El código en cuestión a donde se salta es de nivel 3.
+- Los punteros a las pilas de nivel 3 de ambas tareas y el puntero a la pila de nivel 0 de la tarea pasada por parámetro, 
+deberán ser reinicializados a la base de la pila, teniendo en cuenta que las mismas comienzan al final de la página y no se extienden más que 4096 bytes.
+- Asumir que todas las tareas ya fueron alojadas al menos una vez y que el cambio de tareas se hace en la rutina de interrupción de reloj, como en el taller
+
+--- Resolucion
+
+Para cambiar el codigo que ejecutan ambas tareas: 
+
+1 - Mapear el codigo de la direccion fisica a las direc virtuales de cada tarea
+2 - Reiniciar los punteros de ambos stacks
+3 - Limpiar registros? (hacemos de cuenta que no hace falta)
+4 - Hacer que el EIP de ambas tareas apunte al comienzo del nuevo codigo (el EIP tiene direccion virtual)
+
+a) Necesitamos hacer una entrada en la IDT para la interrupcion 100. A su vez, esta entrada debe ser un selector que apunte a una entrada de la GDT
+que va a ser la que contiene la RAI. La entrada de la IDT debe tener RPL3 , la de la GDT RPL0, ambas present.
+
+b) 
+Parametros:
+    eax = virt
+    ebx = phy
+    ecx = task_sel
+
+global _isr100
+
+_isr100:
+    
+    ; pasaje de parametros
+    push eax
+    push ebx
+    push ecx
+    call cambio_de_codigo   ; Funcion que mapea la pagina de codigo de phy en la direccion virt de ambas tareas
+    mov [esp + 12], esp_direccion_base
+    mov [esp], eax ; ahora el eip que va a popear iret apunta al inicio del nuevo codigo
+
+    mov esp, inicio_stack_niv_0 ; ahora el esp de nivel 0 apunta al principio de la pila
+
+    iret
+
+mmu_map_page(uint32_t cr3, vaddr_t virt, paddr_t phy, uint32_t attrs)
+
+
+void cambio_de_codigo(vaddr_t virt, paddr_t phy, uint16_t task_sel){
+    uint32_t cr3_actual = rcr3(); // cr3 de la tarea actual, se podria hacer un acceso a la tss tmb usando tss_tasks[current_task]
+    
+    tss* tss_tarea_parametro = get_tss_direction(gdt[task_sel >> 3]); // recibe una entrada de la gdt y devuelve la base de la tss
+    cr3_tarea_parametro = tss_tarea_parametro.cr3;
+
+    uint32_t attrs = MMU_P | MMU_U | ¬MMU_W; // esta present, user, y readonly
+    
+    // mapea ambas paginas.
+    mmu_map_page(cr3_tarea_parametro, virt, phy, attrs);
+    mmu_map_page(cr3_actual, virt, phy, attrs);
+    
+    // seteamos todo para la tarea parametro (offset son 24 y 12 xq le sumamos 12 por los 3 parametros q pusheamos antes al stack)
+  
+    esp0_tarea_parametro[24] = esp_direccion_base; // reiniciamos el puntero de la tarea al inicio que es una direc default en nuestro taller (STACK_VIRTUAL_ADDR)
+    esp0_tarea_parametro[12] = virt; // el EIP ahora apunta al inicio del nuevo codigo.
+
+}
+
+tss* get_tss_direction(gdt_entry_t selector){
+    uint32_t base_addr = selector.base_31_24 << 24 |
+                         selector.base_23_16 << 16 |
+                         selector.base_16_0;
+
+    return (tss*) base_addr;
+}
