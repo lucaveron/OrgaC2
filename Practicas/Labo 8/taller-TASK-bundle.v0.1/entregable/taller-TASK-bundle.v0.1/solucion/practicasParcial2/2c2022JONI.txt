@@ -1,3 +1,36 @@
+
+------ Ejercicio 1
+
+En un sistema similar al que implementamos en los talleres del curso (modo protegido con paginación activada),
+se quiere implementar un servicio tal que cualquier tarea del sistema lo pueda invocar mediante la siguiente instrucción:
+    int 100
+
+Recibirá los siguientes parámetros (en ese orden):
+- uint32_t virt, una dirección de página virtual
+- uint32_t phy, una dirección de página física
+- uint16_t task_sel, un selector de segmento que apunta a un descriptor de TSS en la GDT.
+
+Para pasar los parámetros a este servicio, se puede escoger una convención arbitraria.
+
+El servicio en cuestión forzará la ejecución de código comenzando en la dirección física phy, mapeado en virt.
+Tanto la tarea actual como la tarea que sera pasada como parámetro (indicada por su task_sel) deben realizar la ejecucion de la pagina física en cuestión.
+Para eso, dicho servicio deberá:
+- Realizar los mapeos necesarios
+- Modificar los campos necesarios para que la tarea determinada por task_sel, retome su ejecución en la posición establecida la próxima vez que se conmute a ella.
+- Modificar los campos necesarios para que la tarea actual, retome su ejecución en la posición establecida una vez completada la llamada
+
+Se pide:
+a) Definir o modificar las estructuras de sistema necesarias para que dicho servicio pueda ser invocado
+b) Implementar dicho servicio (pseudocódigo)
+c) Dar un ejemplo de invocación de dicho servicio
+
+Detalles de implementación:
+- El código en cuestión a donde se salta es de nivel 3.
+- Los punteros a las pilas de nivel 3 de ambas tareas y el puntero a la pila de nivel 0 de la tarea pasada por parámetro, 
+deberán ser reinicializados a la base de la pila, teniendo en cuenta que las mismas comienzan al final de la página y no se extienden más que 4096 bytes.
+- Asumir que todas las tareas ya fueron alojadas al menos una vez y que el cambio de tareas se hace en la rutina de interrupción de reloj, como en el taller
+
+
 Primero que nada debemos elegir una convencion para pasar por parametro al servicio, debemos elegir una manera de que la tarea que llame al servicio pueda comunicarse con el
 pasandole los parametros de alguna manera. Como la tarea se ejecuta en codigo de nivel 3 y la rutina de atencion a la interrupcion en nivel 0 hay que elegir una convencion para 
 que puedan pasasrse parametros sin perderlos. Podría ser mediante registors, entonces vamos a hacer lo siguiente:
@@ -54,6 +87,8 @@ void cambio_de_codigo(vaddr_t virt, paddr_t phy, uint16_t task_sel){
     tss_tarea_parametro->eip = virt;
     tss_tarea_parametro->esp = STACK_VIRTUAL_ADDR; 
     tss_tarea_parametro->esp0 = tss_tarea_parametro->esp0 & 0XFFFFF000 + 0X1000; //al copmienzo del stacks
+
+    //ADEMAS FALTARIA EL EIP CAMBIARLO EN EL STACK, NO EN LA TSS
 }
 
 
@@ -66,6 +101,8 @@ tss* get_tss_direction(gdt_entry_t selector){
 
 }
 
+
+lospibe: 
 
     ------ Ejercicio 1
 

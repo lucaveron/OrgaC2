@@ -57,7 +57,8 @@ while(true){
     cambiarTarea(); ; esta es la funcion que se encargaría de devolver la ejeccion a la tarea llamadora     
 }
 
-lospibe : 
+
+lospibe:
 ------ Ejercicio 1
 
 En un sistema similar al que implementamos en los talleres del curso (modo protegido con paginación activada), 
@@ -135,20 +136,18 @@ C)
     }
 
     void tarea_6(){
-        while (true){
-            uint8_t resultado = {... procesa el resultado ...};
-            
-            // una vez que ya esta procesado, hay que mandar el resultado a la tss de la tarea llamadora en su eax, habilitarla en el sched
-            // y deshabilitar otra vez la tarea 6.
+        uint8_t resultado = {... procesa el resultado ...};
+        
+        // una vez que ya esta procesado, hay que mandar el resultado a la tss de la tarea llamadora en su eax, habilitarla en el sched
+        // y deshabilitar otra vez la tarea 6.
 
-            // estamos asumiendo que la tarea 1 espera el resultado en EAX para continuar su ejecucion, en caso de que no lo esperara no hace falta
-            // pisar el EAX de la llamadora y simplemente hay que habilitarla nuevamente y deshabilitar la 6.
+        // estamos asumiendo que la tarea 1 espera el resultado en EAX para continuar su ejecucion, en caso de que no lo esperara no hace falta
+        // pisar el EAX de la llamadora y simplemente hay que habilitarla nuevamente y deshabilitar la 6.
 
-            uint8_t id_tarea_llamadora = tss_tasks[6].id_tarea_llamadora;
-            tss_tasks[id_tarea_llamadora].eax = resultado;
-            sched_task_enable(id_tarea_llamadora); // habilitamos otra vez la tarea que nos habia llamado
-            sched_disable_current; // estamos en la 6, se deshabilita la 6 justamente (TIENE QUE ESTAR SI O SI AL FINAL XQ SI EL CLOCK JUSTO NOS CORTA EN LA DE ARRIBA NO SE VUELVE A HABILITAR LA LLAMADORA.)
-        }
+        uint8_t id_tarea_llamadora = tss_tasks[6].id_tarea_llamadora;
+        tss_tasks[id_tarea_llamadora].eax = resultado;
+        sched_task_enable(id_tarea_llamadora); // habilitamos otra vez la tarea que nos habia llamado
+        sched_disable_current; // estamos en la 6, se deshabilita la 6 justamente (TIENE QUE ESTAR SI O SI AL FINAL XQ SI EL CLOCK JUSTO NOS CORTA EN LA DE ARRIBA NO SE VUELVE A HABILITAR LA LLAMADORA.)
     }
 
 D) En nuestro caso, no es necesario hacer ningun cambio a sched_next_task dado que nos encargamos de habilitar y deshabilitar las tareas para que no puedan ser seleccionadas por el scheduler.
