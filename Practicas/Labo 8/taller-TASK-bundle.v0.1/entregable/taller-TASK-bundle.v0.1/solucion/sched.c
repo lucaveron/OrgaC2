@@ -120,3 +120,27 @@ uint16_t sched_next_task(void) {
   // selector.
   return GDT_IDX_TASK_IDLE << 3;
 }
+
+uint16_t sched_next_task(void) {
+  // Buscamos la próxima tarea viva (comenzando en la actual)
+  int8_t i;
+  for (i = (current_task + 1); (i % MAX_TASKS) != current_task; i++) {
+    // Si esta tarea está disponible la ejecutamos
+    if (sched_tasks[i % MAX_TASKS].state == TASK_RUNNABLE) {
+      break;
+    }
+  } // loopea por todas las tareas hasta encontrar la primera que tenga el estado TASK_RUNNABLE (se puede correr creo)
+
+  // Ajustamos i pAara que esté entre 0 y MAX_TASKS-1
+  i = i % MAX_TASKS;
+
+  // Si la tarea que encontramos es ejecutable entonces vamos a correrla.
+  if (sched_tasks[i].state == TASK_RUNNABLE) {
+    current_task = i;
+    return sched_tasks[i].selector;
+  }
+
+  // En el peor de los casos no hay ninguna tarea viva. Usemos la idle como
+  // selector.
+  return GDT_IDX_TASK_IDLE << 3;
+}

@@ -1,0 +1,226 @@
+• Coherencia de Cache:
+a) Explicar cuando empezamos a tener problemas con la coherencia y cual es el problema con
+que la memoria este incoherente respecto de las caches.
+b)  Explicar las diferentes polıticas de escritura, comparandolas segun el uso de procesador y el
+uso del bus. ¿Cual es mas apta para un sistema Monoprocesador y cual para un sistema SMP?
+Justificar.
+c)  Explicar como se podrıa utilizar Copy Back en un sistema SMP.
+d)  ¿Que entiende por snooping y con qu´e elementos se implementa?¿Como se complementa con
+el protocolo MESI? ¿Que cosas se tienen que agregar a nivel de HW para implementar MESI
+(snoop bus, Shared, RFO)?
+e) En el protocolo MESI, ¿qu´e significa el estado ”Modified”?
+f) MESI, tenes una lınea en estado ”Shared”, ¿que significa?¿Que pasa si la queres escribir?¿Es
+impreciso?
+g) Si un procesador quiere leer una lınea que el no tiene pero otro cache tiene en estado ”Modified”, ¿que secuencia de cosas pasan?
+h) ¿Que pasa si un procesador escribe en una linea con ”Modified”?¿Como afecta a la performance
+si se usa un protocolo con Write/copy back comparado con Write through?
+
+
+a- El problema de la coherencia de cache empieza a aparecer cuando estamos trabajando en un sistema multiprocesador y utilizamos politicas de escritura
+del tipo copy back o write through buffered para mas eficiencia. El problema de este tipo de escrituras es que cuando el procesador escribe en memoria,
+primero escribe en una linea de la memoria cache sin actualizar el dato real en memoria. Lo que sucede es que si hay dos cores trabajando con la misma direccion de memoria
+y una de ellas la modifico en su cache, el otro core no se va a enterar de esot por lo que estará trabajando con un dato que no es correcto debido a que fue modificado.
+Esto en sistemas que utilizan threads para los procesos puede resultar muy perjudicial ya que se resume en trabajar con datos incorrectos que llevan a ejecuciones incorrectas.
+Para eso si queremos usar estos tipos de escrituras debemos utilizar un protocolo de coherencia entre las cache asi como los snoopy buses y el protocolo M.E.S.I.
+
+b- Diferentes tipos de escritura:
+- Write through: la idea del write through es que el procesador escriba directamente el dato en la direccion de memoria RAM, para luego de ser escrito, copiar
+la linea en el cache y así tener actualizada la memoria cache. Lo bueno de esto es que vamos a tener coherencia total entre la cache y la memoria y nunca tendremos
+diferentes datos para una direccion de memoria entre ambas memorias. El problema es que tengo que acceder por cada esritura a la memoria, lo que nos hace perder tiempo
+por lo tanto rendimiento ya que accedemos reiteradas veces a la memoria, lo que tambien hace que accedamos varias veces al bus del sistema.
+
+- Write through Buffered: Esta politica es muy parecida a la de arriuba con la diferencia de que no vamos a escribir directamente en memoria, sino que el procesador
+lo va a escribir en cache y el cache mismo va a ir encolando en un buffer las lineas para ira ctualizandolas en memoria. Lo bueno de esto es que le procesador al escribir
+directamente en cache lo hace mas rapido que el anterior, lo malo es que seguimos accediendo varias veces al bus del sistema y mas si generamos una cola podemos congestionar
+el bus. Además como el procesadore scribe mas rapido de lo que la memoria cache copia a memoria RAM, si la cola esta llena y el procesador quiere escribir va a tener que esperar
+que el controlador de cache escriba en memoria RAM una direccion para liberar un espaico y asi pueda realizar su escritura.
+A nivel de coherencia puede que sea un poco menos coherente que la anterior debido a que si un programa se corta mientras el buffer de cola de direcciones esta llena, esas direcciones
+todavía no fueron actualizadas y el procesador ya pasoe sas lineas del programa por lo que se perdera esa información.
+
+-Copy back: En esta politica el procesador escribe direcamente en memoria cache, lo que resulta muchisimo mas eficiente y rapido, no vamos a congestrionar el bus de sistema ya que 
+solo vamos a ir a memoria RAM cuando tengamos que desalojar una linea de memoria cache, entonces segun la politica de remplazo que utilizamos, al momento de que el cache este 
+lleno y tengamos que quitar una linea, es ahi cuando copiaremos esa linea a MEMORIA RAM. La desventaja que teiene esto es que la cache va a estar totalmente incoherente a la memoria
+RAM lo que genera que si un programa se corta en el medio entonces la información que teiene el procesador en el punto que se freno y la información en la memoria RAM son totalmente
+incoherentes.
+
+Para sistemas Monoprocesador como no nos interesa tanto la coherencia es mejor usar copy back y para sistemas smp es mejor usar politicas que tengan coherencia como write through o 
+write through buffered. También se puede utilizar siempre q se p'ueda copyback para hacer el sistema mas eficiente y con mas rendimiento pero se necesitan de hardware y logica extra
+para mantener la coherencia
+
+c y d) Para utilizar copyh back en un sistema smp vamos a necesitar un protocolo de coherencia de datos entre las distntas cache para no leer o escribir direcciones de memoria incorrectas cuando
+otro procesador la modifico en su cache. Para eso se utilizan los protocolos de coherencia, estos se dividen en snoopy protocols y directory protocols.
+
+La idea del snoppy protocol es agregar un bus entre cada controlador de cache y el bus de sistema, es deicr no es un bus entre caches sino un bus de cada cache con el bus de sistema,
+la idea es poder espiar como su nombre lo indica que hace el resto de procesadores con losd atos de cache. Entonces la idea es que a medida que un procesador quiera escribir una linea
+de cache que nosotros tambien poseemos podamos tomar acciones al respecto. El snoopy bus tiene dos lienas de constrol y una linea de adress debido a que nos importa donde quiere
+escribir el procesador y si quire escribir o leer . Si quiree leer no hay tanto dilema, el problema existe cuando quiere escribir en memoria cache y debemos realizar una accion al respecto.
+Lo que se hace en esos casos es una politica de write invalidate o write update. La politica de write update es que cuando un procesador cambie una linea de cache , el resto
+de caches que la comparten puedan a tiempo real actualizar su linea tambien en cache(no es muy utilizada asi que no profundizo). La política de write invalidate lo que hace es cuando
+otro procesador escribe una linea que tenemos la invalidamos en nuestra cache. 
+Los snoopy protocols son ideales para un multiprocesador basado en unico bus compartido, porque el bus proporciona un medio simple para broadcastear y snoopear. 
+Sin embargo, debido a que uno de los objetivos del uso de caches locales es evitar los accesos innecesarios al bus principal, se debe tener
+cuidado de que el aumento del trafico del bus debido al broadcasteo y al snoopeo no anule las ganancias
+del uso de memorias cache. Si bien el uso del snooping resuelve el problema de la coherencia, todo lo dicho esta mas que nada pensado para politicas como write through,
+para utioizar copy back necsitamos mas comunicacino entre los controladores para mantener la coherencia intacta. Para esto se utiliza un protocolo de coherencia denominado
+protocolo M.E.S.I. para poder utilizar este protocolo se agregan lineas al hw entre los controladores , una linea 'RFO' y una linea 'shared'. Esto con el objetivo de avisarse
+entre las caches cuando es necesario que un controlador tome el control de una linea de cache por sobre todo el resto y cuando empieza una linea a ser compartida.
+Cada linea adopta un estado(modified,exclusive,shared y invalid).
+
+e)La linea modified significa que esa linea de cache fue recientemente modificada por el procesador y por lo tanto esta INCOHERENTE con la direccion de memoria hasta el momento
+que se realice el copyback correspondiente. Etnonecs la linea de cache esta "sucia", por lo que el resto de caches deberian tener invalidadas esta linea ya que el dato nuevo solo 
+esta en esa cache.
+
+f)Una linea en estado shared significa que esa linea esta presente en ese cache y en otros principalemte. La idea de esta linea es que al ser compartida, si en algun momento se modificada
+todas aquellas cache que la contengan se enteren e invaliden esta linea.  Entonces cuando un procesador quiere escirbir esa linea de cachem todas aquellas que la tienen en shared
+y como es shared es coherente ocn memoria, deberan ponerla en invalid y para obtenerla nuevamente tendran que luego ir a buscarla a memoria despues 
+de que el procesador que escriba esa linea la pone en memoria. Entones si una linea esta shared y la escribimos el escenario es el siguiente.
+Se pide el 'RFO' al resto de caches.
+Aquellas caches que tenian esta linea la ponen como INVALID.
+La linea en la cache modificada pasa a ser modified.
+
+El estado no es preciso ya que no tenemos forma de saber si en algun momento la linea de cache pasa de shared a exclusive(es decir si esta como shared y por algun motivo luego de 
+vartias instrucciones ya las caches con la que compartia esta linea, no la tienen mas). Los unicos estados precisos son modified y exclusive
+
+g)Si un procesador quiere leer una linea de cache que el no tiene pero otro la tiene en modified el escenario es el siuiente.
+Gracias al snoop bus el cache con la linea modified se entera y pide el ownership a traves de la linea RFO.
+- Activa la lınea ”RFO” para indicar al lector que ese dato esta incoherente (bloqueandola lectura a memoria y tomando control del bus compartido).
+- Se encarga de copiar a memoria el dato modificado
+- Habilita la lectura para que el procesador que queria leer la linea pueda ir a buscarla y actualizarla en su propia cache
+- Ambas lineas se ponen shared.
+
+h)  Si un procesador escribe en una línea en estado "Modified", la escritura se realiza directamente en la cache sin necesidad de invalidar otras caches, lo que mejora la eficiencia. 
+Comparado con Write-through reduce significativamente el tráfico en el bus, mejorando la performance en sistemas SMP debido a que solo tiene que ir a la cache, en cambio si utilizara
+write through o write through buffered debería ir directamente a memoria o copiar en cache y encolar para eventualmente copiar en memoria lo que afecta el rendimiento.
+
+
+• Prediccion de Saltos:
+a) ¿Como funciona un predictor de saltos de 2 bits? Motivacion y funcionamiento. Incluir diagrama y transiciones de estado.
+b) ¿En que situaciones funciona bien un predictor de saltos de 2 bits y mal uno de 1 bit?
+c) ¿Por que usar un predictor de 2 bits y no uno de 1 bit, 3 bits, spec89, etc?
+
+ • Ejecucion Fuera de Orden
+e) Concepto y funcionamiento general. ¿Que nuevas dependencias se introducen con la ejecucion
+fuera de orden?
+f) Ventajas respecto de un esquema superescalar con ejecucion en orden. Considerar que ambos
+modelos tienen la misma cantidad de vıas de ejecucion.
+
+
+a)La idea del branch prediction Buffer es ir guardando resultados de los distintos branch del programa para poder intentar predecirlos y así ejecutar las instrucciones desde
+la direccion correspondiente aunque puede fallar.
+La idea entonces es tener una memoria cache indexada con los bits menos significativos de las direcciones saltadoras, y dos bits de estado.
+Teniendo en cuenta que el branch prediction buffer no guarda el la direccion entera por lo que se puede fallar al predecir el salto, en ese caso se descartan las instrucciones
+fetrcheadas y se sigue donde coresponde.
+La idea de los dos bits de estado es poder mantener una coherencia con los branch ya realizados. Es decir vamos a tener 4 estados,
+11, 10, 01 y 00 . La idea es que si tenemos 11 , vamos a predecir que el salto es taken,luego si fallamos la prediccion, no vamos a cambiar a non-taken, sino que
+vamos a pasar a taken pero mas debil 10. Entonces para pasar de taken a non-taken debemos fallar la prediccion dos veces seguidas y es ahí cuando pasamos a non-taken, lo mismo
+para el caso de arrancar con la prediccion en non-taken(00). Esto se hace para tener un control mas sofisticado de las predicciones y no tener un error de rendimiento ya que en los 
+buffer de prediccion de saltos de un solo bit lo que ocurre es que podemos fallar en la prediccion asi sea casis iempre taken, yt podemos fallar dos veces seguidas. Y si es non-taken
+por ejemplo dos bucles anidados 
+for(i = 0 ; i < 256; i++){
+    for(i = 0 ; i < 256; i++){
+lo que ocurre es que podemos mal predecir 512 veces seguidas. Entonces al utilizar 2 bits de estado ons ahorramos esto.
+El esquema de prediccion de un bit tiene una defecto de rendimiento: incluso si un branch casi
+siempre es taken, podemos predecir de forma incorrecta dos veces seguidas, en vez de una, cuando es
+non-taken
+Este tipo de branch prediction se hace en la etapa del fetch apora que sea mas eficiente y s eutiliza un cache de direcciones de salto mediante la direccion de instrucciones.
+
+b)Funciona bien en bucles y patrones repetitivos donde los saltos son predecibles, mientras que un predictor de 1 bit puede fallar en estos casos debido a cambios 
+abruptos en los saltos, causando más errores y penalizaciones.
+
+c) Utilizamos un predictor de 2 bits ya que es mas eficiente a fallas que uno de 1 bit, además gracias al spec89 que es un consorcio que se formo entre productores de hardware para
+hacer benchmarking en los programas se demostróo que agregar mas bits de estado no vale la pena porque la eficiencia resultante no es compensada con el hardware y logica adicional 
+que hay que poner. Laa idea de spec89 es que se puedan testear programas con fuentres de programas donados que NO ESTEN hechos para el benchmarking ya que sino puede inconscientemente
+el programa estar optimizado para este tipo de pruebas. La idea de este es meter logs en los programas para ir midiendo hits deel cache, prediccion de saltos, eficiencia y demás y se llego a qu
+sirve mucho el branch prediction buffer de 2 bits, aumenta hasta un 82% la eficacia. No hace falta que sea tan frande, nmo masde 4k. y no sirvem mas de 2 bnits,es al pedo. ademas 
+se vio que la eficacia es mejor en programas de punto flotante
+
+d)En el scheduling estatico y prediccion de saltos estatica la idea es ir fetcheando , ejecutando y aplicando resultados en el orden en que fueron fetcheadas. Esto esta bueno a nivel
+de logica adicional ya que es mas sencillo diseñar un pipeline con estas caracteristicas. Sin embargo sabemos que al momento de realizar un pipeline sin ejhecucion fuera de orden,
+lo que pasará es que al momento de que una instruccion I2 depndiente del reultado I1, deberá esperar a que la instruccion I1 finalice su ejecucion. Que está bien a nivel de logica
+de funcionamiento pero el problema es que todas las instruccion que vienen luego de I2 tambien deberan esperar ya que la ejecucion es en orden provocando un pipeline stall.
+Para solucionar esto surgió la idea de utilizar un scheduling dinamico,ya que no las penalidades del shceduling estatico en arquitectueas super esclares ascendian significativamente
+ para eos surgio la idea de reorganizar la manera en que las instrucciones son ejecutadas. Hasta ahi la idea era respetar siempre
+los ordenes de fetch, ejecucion y write result. Entonces la idea del scheduling dinamico es tratar de que la etapa de ejecucion de las instrucciones se puedan realizar 
+FUERA DE ORDEN. es decir si en ese caso tenemos una instruccion I3 que no depende ni de I1 ni de I2 poderla ejecutar sin necesidad de esperar a I2.
+Teniendo esto en cuenta tenemos dos tipos de tecnicas a la hora de ejecutar fuera de orden= Fetchear en orden, ejecutar fuera de orden y aplicar en orden. O  Fetchear en orden, ejecutar fuera de orden
+ y aplicar en fuera orden tambien.
+ La idea general es tratar de dividir la etapa de resultado en 2 par a el aplicado en orden, en un "guardar resultado" y en un aplciar resultado. Así podemos ir ejecutando als instrucciones
+ guardarlas para que sean utilizadas si es necesario, pero commitearlas una vez le "toque". Asi podriamos hacer el sistema mas eficiente respetando orden de commiteo. Mientras que 
+ en aplique fuera de orden el commiteo se hace luego de la ejecucion lo que puede generar problemas para el manejo de excepciones.
+
+ uno de los grandes obstaculos que tenemos es el tema del manejo de excepciones, ya que como sabemos las excepciones se dan en el medio de u programa y lo ideal es que todo lo previo
+a la instruccion que generó la excepcion ya haya sido ejecutado mientras nada de lo que venga despues de la misma haya modificado el proceso del programa. A los excepciones que pueden
+"esperar" a que todo lo anterior haya sido ejecutado y nada dde lo siguiente modificó el estado del programa se las denominan "precisas". Mientras quye a las que no peuden hacere esto
+tienen que volcar mucha información al stack del estado del programa cuando surgio la excepcion lo que hace que se llene mas la memoria y sea menos eficiente el programa para volver
+a su ejecucion en caso de ser posible. Por lo tanto la ejecucion fuera de orden asegura un mejor rendimiento pero hayq eut ener cuidado con el manejo de excepciones, por ejemplo 
+x86 ejecuta fuera de orden y tiene excepciones precisas pero lo tuvo que oapgar con hardware y logica aaplicada al hardware que ocupa espacio.
+
+Ademas se introducen las dependencias WAR WAW Y RAW en caso de querer acceder a operandos previamente a que hayan sido actualizados, o escribir antes de lo debido.
+
+f) Las ventajas de un sistema superescalar son la cantidad de resultados que se obtienen en menos tiempo ya que por ejemplo si tenemos 5 etapas, fetch decode opcode fetch execute y write.
+cadauna tarda un clock. En ejecucion en orden tardaríamos 10 clocks apra dos instrucciones mienntras que una arquitectura superescalar con pipelines tadaría 6 ciclops de clock,
+No mejor el tiempo de instruccion individual pero si mejora la cantridad de resultados en ese tiempo. Ademas la ejecucion fuera de orden ofrece mejorar la cantidad de clocks de estos pipelines
+por esto que dijimos antes de que podemos realizar instrucciones sin depender de si una instrucion previa tiene o no una dependencia, esto hace que se reguile el pipeline stall,
+
+• Algoritmo de Tomasulo
+a) Explicar cuales son los bloques de hardware que se agregan a un procesador superescalar, que
+riesgos resuelve y como funciona cada uno.
+b) ¿Que elementos tiene una Reservation Station?
+c) ¿Como se establece la relacion consumidor/productor segun Tomasulo?¿Donde esta el tag o
+a que hace referencia?
+d) ¿Cuando se debe stallear una instruccion?
+e) Detallar secuencia de pasos para ejecutar una instruccion.
+
+a) Los bloques de hardware que se agregan son las Reservation Stations(RS) y la register alias table para poder realizar el register renaming.
+La idea del algoritmo de tomasulo es evitar los riesgos RAW y neutraliar los riesgos WAW Y WAR.Ademas se agrega un bus llamado comon data bus de mucha utilidad en este sistema.
+La idea es la siguiente:
+
+Tomasulo penso cuales eran las necesidades para una ejecucion fuera de orden y estas fueron:
+- Un link entre el productor de un dato y sus consumidores. Es decir una instruccion que refrescara un registro destino y aquellos que necesitan ese registro como operando.
+- Un lugar donde mantener las instrucciones esperando a sus operandos.
+- Algo que les señale a las instrucciones cuando tienen sus operandos listos apra poder ejecutarse.
+
+La idea consiste en pdoer renombrar los pocos registros arquitrecturales que tenemos a muchos virtuales con un tag que será el ultimo renombre asigfnado a ese registro.
+
+
+Entonces la idea es poder ponerle a cada operando un tag relacionado con el registro de la RS encargada de "escupir" el resultado de ese operando gracias a la RAT.
+El RAT consisteen una tabla con una entrada por cada registro arquitectural, de manera tal que permita almacenar el ultimo tag correspondiente a cada registro, para 
+que la proxima instruccion a despachar sepa como referenciar a la instancia actual de cada uno de sus operandos. Las entradas de la
+RAT contienen tres campos: el campo tag, el campo valor y un bit de validez
+
+La idea entonces es mantener subsitemas en los que se pueda tener a las instrucciones esperando por sus operandos, ese subsistema tendrá un codigo de operacion y 
+para cada operando vamos a tener la misma estructura del RAT: un tag, un valor,y un bit de validez.
+
+Entonces lo que sucede es lo siguiente:
+
+Fetch: se fetchea la instrruccion y se decodifica hasta que se envia a una unidad funcional
+Issue(envío) : La idea es poder enviar la instruccion a la rs correspondiente a la unidad Funcional para así poder esperarla a ejectuarse, a la vez de actualizar el registrto destino
+en la RAT. El problema aquí es que si no hay espacio en la rs deberá esperar a que se descongestione generando un stall.
+En caso de estar disponible pasa a la rs actualizadno la rat esperando que sus operandos esten ready.
+Execute: Una vez todos sus operandos estan readys se envía a la unidad funcionmal para ejecutarse
+Write result: Cuando ya tenenos el resultado enviamos esta información por el CDB para que aquellos que necesitaban este operando ya lo puedan poner como ready y asi utilizarlo en sus
+instrucciones. Además como el cdb une al banco de registros con las rs y los store buffers no necesitamos esperar a que se actualice el banck register para asi ir a buscar los operandos
+sino que todas las instrucciones en la RS estan esperando que una instruccion termine para que actualice el registro destino asi tiene su operando , a la vez que se actualiza la RAT
+con el registrod estino de la instruccion.
+
+
+
+• ReOrder Buffer
+a) ¿Que le falto al algoritmo de Tomasulo para tener excepciones precisas?
+b) ¿Que elementos tiene un reorder buffer?
+c) Explicar la implementacion de Intel del Algoritmo de Tomasulo en el Three Cores Engine,
+detallando cada parte involucrada.
+
+a) al algoritmo de tomasulo le falta aplicar los resultados en orden para así en caso de tener una excepcion poder tener una excepcion poder tener todas las innstrudcciones previas 
+a la instruccion que genero la excepcion 100% completadas y que ninguna de las instrucciones posteriors hayan modificado el proceso del sitema. Ya que como el tomasul escribe de una 
+en los registros, al generarse una excepcion se deberá madnar mucha mas información a la excepcion debido a vamos a tener resultados de instrucciones posteriores a la instruccion
+que generó la excepcion provocando asi una excepcion imprecisa quer esulta en menos eficiencia.
+
+b) Un reorder buffer contiene las reservation station al igual que toimasulo y se agrega un reorder buffer que no es otra cosa que un buffercircular con head y tail en el que se van a 
+mantener los resultados de las instrucciones pero no se van a commitear hasya que le llegue el orden mientras que el resto de instrucciones van a usar los resultados de los operandos 
+de la rob para resolver dependeencias entonces la rob tendrá el ultimo valor de cada operando destino de cad ainstruccion que ya finalizo su ejecucion.
+el reorder buffer tenia entradas que cada entrada tiene
+- Destinod e la instruccion
+- Valor de la instruccion
+- Tipo de instruccion
+- bit de ready

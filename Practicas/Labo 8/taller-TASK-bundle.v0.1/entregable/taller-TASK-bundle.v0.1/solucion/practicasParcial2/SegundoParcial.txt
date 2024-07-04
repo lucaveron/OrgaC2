@@ -1,0 +1,282 @@
+1a) Primero que nada vamos a asumir que ya tenemos definidas las estructuras necesarias para el funcionamiento de las
+tareas. Es decir todas las estructuras realizadas en el taller para que las tareas funcionen correctamente, sus descriptores 
+en la gdt para codigo y datos de la tarea, tanto los descriptores para sus tss como las entradas y descriptores de las
+interrupciones ya existentes.
+
+Luego como vamos a definir una nueva syscall vamos a necesitar definir una nueva entrada en la idt, esta tendra dpl 3
+para que pueda ser llamada por cualquier tarea, La entrada tendrá un selector de la gdt y el descriptor de esta gdt
+tendra la informacion necesaria para la ejecucion del codigo de la rutina de atencion de la interrupcion provocada por 
+la syscall. La entrada a definir en la idt será la 137, entonces usaremos ese numero de interrupcion para convocar
+a la syscall.
+
+
+Por convencion y facilidad vamos a decir que los parametros de la tarea a la syscall se pasarian por registros, 
+asi entonces tenderemos
+eax = selector de la tarea a espiar 
+ecx = direccion virtual a leer 
+edx = direccion virtual destino a copiar.
+
+Entonces la tarea que quiere llamar a la syscall haria algo del estilo
+
+tarea_llamadora = 
+    mov ax, <selector>
+    mov ecx, <virtual_a_leer>
+    mov edx, <virtual_a_escribir>
+    int 137
+
+
+global isr137
+    _isr137:
+    pushad
+
+    push edx ; virtual a escribir
+    push ecx ; virtual a robar 
+    push ax ; selector de la tarea a robar
+
+    call servicio_espia
+    add esp, 12
+    popad ; al hacer el popad, en eax estará el return de la funcion servicio_espia que sera 1 o 0 dependiendo si se pudo robar o no
+    iret
+
+
+int servicio_espia(uint16_t tss_selector, uint32_t virtual_a_leer, uint32_t virtual_a_escribir){
+  //Primero que nada debemos obtener la virtual a robar
+
+  //obtenemos el cr3 de la tarea a robar,tss_selector un selector de segmento que apunta a un descriptor de TSS en la GDT.
+  tss_t tss_tarea_robada = get_tss_direction(gdt[tss_selector >> 3]); //limpio atributos,lo utiilizo como indice de la gdt, devuelve puntero
+  paddr_t cr3_tarea_parametro = tss_tarea_robada->cr3;
+  pd_entry_t pd_base_tarea_parametro = CR3_TO_PAGE_DIR(cr3_tarea_parametro); //es una dirección que ya está en unidades de bytes porque CR3 contiene la dirección física base del directorio de páginas
+  pd_entry_t pd_tarea_parametro = pd_base_tarea_parametro[VIRT_PAGE_DIR(virt_a_robar)];
+
+  if (!( pd_tarea_parametro.attrs & MMU_P)){
+    return 0;
+  }
+
+  pt_entry_t pt_base_tarea_parametro = (pt_entry_t*)(pd_tarea_parametro.pt << 12); //la page_table la devuelve en unidades de pagina, debo multiuplicarla por 4096 para poder utilizarla en bytes
+  pt_entry_t pt_tarea_parametro = pt_base_tarea_parametro[VIRT_PAGE_TABLE(virt_a_robar)];
+
+  if (!( pt_tarea_parametro.attrs & MMU_P)){
+    return 0;
+  }
+
+  paddr_t phy_robada = (pt_tarea_parametro.page << 12) | VIRT_PAGE_OFFSET(virt_a_robar); //obtengo la posicion fisica correspondiente alineando a bytes
+
+  //ahora obtengo direccion fisica de la virtua destino
+  paddr_t cr3 = rcr3(); //en el taller
+  pd_entry_t pd_base = CR3_TO_PAGE_DIR(cr3); //es una dirección que ya está en unidades de bytes porque CR3 contiene la dirección física base del directorio de páginas
+  pd_entry_t pd = pd_base[VIRT_PAGE_DIR(virt_a_robar)];
+
+  pt_entry_t pt_base = (pt_entry_t*)(pd.pt << 12) //la page_table la devuelve en unidades de pagina, debo multiuplicarla por 4096 para poder utilizarla en bytes
+  pt_entry_t pt = pt_base[VIRT_PAGE_TABLE(virt_a_robar)];
+
+  paddr_t phy_destino = (pt.page << 12) | VIRT_PAGE_OFFSET(virt_a_robar); //obtengo la posicion fisica correspondiente
+
+  //llamo a copy_page modificada para que realice la copia ya que antes tengo que mapearlas, sino el procesador tomara las direcciones como virtual e intentara traducirlas
+
+  copy_page_modificada(phy_destino, phy_robada);
+
+  return -1;
+}
+
+tss* get_tss_direction(gdt_entry_t selector){
+    uint32_t base_addr = (selector.base_31_24 |
+                          selector.base_23_16 |
+                          selector.base_16_0)
+
+    return (tss_t*) base_addr;
+}
+
+void copy_page_modificada(paddr_t dst_addr, paddr_t src_addr) {
+    
+    uint32_t cr3 = rcr3(); 
+
+    mmu_map_page(cr3, SRC_VIRT_PAGE, src_addr, MMU_P);
+    mmu_map_page(cr3, DST_VIRT_PAGE, dst_addr, MMU_W | MMU_P);
+
+    uint32_t* dst =  (uint32_t*) DST_VIRT_PAGE;
+    uint32_t* src =  (uint32_t*) SRC_VIRT_PAGE; 
+    
+        dst[0] = src[0];
+
+    mmu_unmap_page(cr3, DST_VIRT_PAGE);
+    mmu_unmap_page(cr3, SRC_VIRT_PAGE);
+
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+LO QUE HABIA HECHO EN EL PARCIAL
+
+int servicio_espia(uint16_t task_selector, uint32_t virt_a_robar, uint32_t virt_destino){
+    //con selector nose si se refieren a  un selector de segmento que apunta a un descriptor de TSS en la GDT., o si se refieren al task_id del scheduler asi que por las dudas voy por el camino dificil que es la primera opcion
+    //sino seria mas facil y tan solo seria poner tss_tasks[task_selector], asumo que no
+    tss* tss_tarea_parametro = get_tss_direction(gdt[task_selector >> 3]); // recibe una entrada de la gdt y devuelve la base de la tss
+    paddr_t cr3_tarea_parametro = tss_tarea_parametro->cr3;
+
+    pd_entry_t* pd_base_tarea_parametro = CR3_TO_PAGE_DIR(cr3_tarea_parametro);
+    pd_entry_t pd_tarea_parametro = pd_base_tarea_parametro[VIRT_PAGE_DIR(virt_a_robar)];
+
+    pt_entry_t* pt_base_tarea_parametro = (pd.pt << 12); // dejo lugar para el offset
+    pt_entry_t pt_tarea_parametro = pt_base_tarea_parametro[VIRT_PAGE_TABLE(virt_a_robar)];
+    if (! (pd_tarea_parametro.attrs & MMU_P && pt_tarea_parametro.attrs & MMU_P)){ //si alguna de las dos no esta mapeada devuelvo 0 y no copio nada
+        return 0;
+    }
+    paddr_t page_a_robar = pt.page << 12 | VIRT_PAGE_OFFSET(virt_a_robar);
+    //aca ya tengo los 4 bytes a robar en page_a_robar ya que ya llegué desde la virtual hasta fisica que tengo que robar
+    //ahora debo hacer el mismo proceso para virtual destino y remplazar
+    paddr_t cr3 = rcr3();
+    pd_entry_t* pd_base = CR3_TO_PAGE_DIR(cr3);
+    pd_entry_t* pd = (pd_entry_t*) &pd_base[VIRT_PAGE_DIR(virt_destino)]; //necesito trabajar con punteros para no tener una copia sino apuntar a la posicion real
+
+    pt_entry_t* pt_base = (pd->pt << 12); // dejo lugar para el offset
+    pt_entry_t* pt =(pt_entry_t*) &pt_base[VIRT_PAGE_TABLE(virt_destino)]; //desreferencio para asi apunar a la posicion real destino
+    // una vez tenemos las dos paginas solo deberiamos remplazar la del destino 
+
+    (pt->page << 12 ) | VIRT_PAGE_OFFSET(virt_destino) = page_a_robar; // aca hacemos la copia de los 4b a robar en el destino
+
+    return -1;
+
+}
+
+paddr_t translate_vaddr_to_paddr(paddr_t cr3, vaddr_t vaddr) {
+    uint32_t pd_offset = VIRT_PAGE_DIR(vaddr);
+    uint32_t pt_offset = VIRT_PAGE_TABLE(vaddr);
+    uint32_t page_offset = VIRT_PAGE_OFFSET(vaddr);
+
+    pd_entry_t* page_directory = CR3_TO_PAGE_DIR(cr3);
+    pd_entry_t* pd_entry = &page_directory[pd_offset];
+
+    if (!(pd_entry->attrs & MMU_P)) {
+        return 0;
+    }
+
+    pt_entry_t* page_table = (pt_entry_t*)(pd_entry->pt << 12);
+    pt_entry_t* pt_entry = &page_table[pt_offset];
+
+    if (!(pt_entry->attrs & MMU_P)) {
+        return 0;
+    }
+
+    paddr_t paddr = (pt_entry->page << 12) | page_offset;
+    return paddr;
+}
+
+
+tss* get_tss_direction(gdt_entry_t selector){
+    uint32_t base_addr = selector.base_31_24 << 24 |
+                         selector.base_23_16 << 16 |
+                         selector.base_16_0;
+
+    return (tss*) base_addr;
+}
+
+
+
+
+
+
+
+EJERCICIO 2)
+
+La idea a proponer es la siguiente: Cuando salta la interrupcion del clock, si la tarea interrumpida por el clock 
+lo que vamos a hacer es actualizar la tss de la tarea guardando el valor de edx, sea o no el valor requerido para 
+ser prioritaria. Esto lo podemos ahcer ya que la tss tiene un espacio reservado para el edx .
+Una vez realizado esto vamos a tener que cambiar el sched_next_task para ver que tarea es la que sigue, lo que vamos a 
+realizar es buscar hacer una busqueda parecida a la que se hace para encontrar la tarea siguiente respetando el round 
+robbin pero ademas de preguntar si al tarea es RUNNABLE vamos a preguntar si la tss de la tarea en el campo donde guarda
+edx es 0x00FAFAFA, de ser así , como el ciclo empezó desde la current task, devolvemos esa tarea, asi hasta iterar 
+en todas las tareas actuales va a devolver la primer tarea que se encuentre prioritaria. Si no encontro ninguna entonces
+va a buscar como lo hizo siempre, sin tener en cuenta prioridad
+
+Las respuestas para las preguntas entonces serían que el edx se guarda en la tss de cada tarea, y el scheduler para
+chequear que tarea es la siguiente pregunta en la tss de cad atarea por el registro edx. Todo esto asumiendo que tenemos el 
+array global definido en el taller de tss_tasks que es un arreglo de las tss indexado por el id de la tarea y que 
+tenemos la variable global current_task
+
+global _isr32
+; COMPLETAR: Implementar la rutina
+_isr32:
+    pushad
+    ; 1. Le decimos al PIC que vamos a atender la interrupción
+    call pic_finish1 ; notifica al pic que se atendio la interrupcion
+    call next_clock ; actualiza lo que se muestra en pantalla (clock)
+    
+    push edx
+    call save_edx
+    add esp, 4
+    ; 2. Realizamos el cambio de tareas en caso de ser necesario
+    call sched_next_task ; se encarga de devolver en ax el selector de la proxima tarea
+    cmp ax, 0 ; se fija si no es nula
+    je .fin ; si es nula va al fin
+
+    str bx ; manda a bx el selector de la tarea actual
+    cmp ax, bx ; se fija si es la misma
+    je .fin ; si es igual se va al fin
+
+    mov word [sched_task_selector], ax ; si no es nula, cambia el selector para apuntar a la nueva tarea
+    jmp far [sched_task_offset] ; hace el jmp far para que se haga el cambio de tarea y por ende de contexto
+
+    ;en este punto el procesador guarda en la tss correspondiente a la tarea el eip de esta tarea. que sera la proxima ejecucion del programa.
+    //que en este caso vendria a ser lo de abajo, entonces al hacer el popad, va a agarrar todos los registros de la tss y va a pisar los del procesador 
+    //haciendo que el contexto del procesador sea el mismo que el de la tarea cuando fue interrumpida
+    .fin:
+    ; 3. Actualizamos las estructuras compartidas ante el tick del reloj
+    call tasks_tick
+    ; 4. Actualizamos la "interfaz" del sistema en pantalla
+    call tasks_screen_update
+    popad
+    iret
+
+void save_edx(uint32_t edx){
+    tss_t tss = tss_tasks[current_task]; /todo el tiempo la tss va a tener el ultimo valor de edx para chequear si es prioritaria
+    tss->edx = edx;
+}
+
+uint16_t sched_next_task(void) {
+
+  int8_t encontro = 0;
+  int8_t i;
+  for (i = (current_task + 1); (i % MAX_TASKS) != current_task; i++) {
+    // Si esta tarea está disponible la ejecutamos
+    if (sched_tasks[i % MAX_TASKS].state == TASK_RUNNABLE && tss_tarea.edx == 0xFAFAFAFA) {
+        encontro = 1;
+        break;
+    }
+  } // loopea por todas las tareas hasta encontrar la primera que tenga el estado TASK_RUNNABLE (se puede correr creo)
+
+
+  if (encontro){
+        i = i % MAX_TASKS; //para hallar el id de tarea correcto debido a que nunca se decrementa el valor de current task siempre se incrementa
+        // Si la tarea que encontramos es ejecutable entonces vamos a correrla.
+        if (sched_tasks[i].state == TASK_RUNNABLE) {
+            current_task = i;
+            return sched_tasks[i].selector;
+        }
+
+  }else {
+    if (sched_tasks[current_task].state == TASK_RUNABLE && tss_tasks[current_task].edx == 0xFAFAFAFA){
+      return sched_tasks[current_task].selector
+    }
+  }
+
+  // si ninguna es prioritaria, busco normalmente
+  //int8_t i; ya esta definida
+  for (i = (current_task + 1); (i % MAX_TASKS) != current_task; i++) {
+    // Si esta tarea está disponible la ejecutamos
+    if (sched_tasks[i % MAX_TASKS].state == TASK_RUNNABLE && tss_tarea->edx == 0xFAFAFAFA) {
+      break;
+    }
+  } // loopea por todas las tareas hasta encontrar la primera que tenga el estado TASK_RUNNABLE (se puede correr creo)
+
+  // Ajustamos i para que esté entre 0 y MAX_TASKS-1
+  i = i % MAX_TASKS;
+
+  // Si la tarea que encontramos es ejecutable entonces vamos a correrla.
+  if (sched_tasks[i].state == TASK_RUNNABLE) {
+    current_task = i;
+    return sched_tasks[i].selector;
+  }
+
+  // En el peor de los casos no hay ninguna tarea viva. Usemos la idle como
+  // selector.
+  return GDT_IDX_TASK_IDLE << 3;
+}

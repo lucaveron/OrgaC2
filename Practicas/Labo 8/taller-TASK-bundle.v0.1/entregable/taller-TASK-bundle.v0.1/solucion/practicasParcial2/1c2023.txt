@@ -34,13 +34,14 @@ _isr47:
     add esp , 4
 
     jmp far selectorTarea6:offset
+    popad
     iret
 
     
     uint8_t habilitar_tarea_6(resultado){
 
         sched_disable_task(tarea_actual):
-        shed_enable-task(6);
+        shed_enable_task(6);
         tss_t tss_t6 = tss_tasks[6]:
         tss_t6.eax = resultado; ; guardo en la tss de la tarea 6 el resultado procesado.
         return current_task

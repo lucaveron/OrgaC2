@@ -49,6 +49,10 @@ struct keyboard_state {
 	bool f11, f12;
 };
 
+struct prioridad {
+	
+}
+
 struct environment {
 	uint32_t tick_count;
 	int8_t task_id;

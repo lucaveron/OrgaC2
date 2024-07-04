@@ -180,7 +180,7 @@ paddr_t mmu_unmap_page(uint32_t cr3, vaddr_t virt) {
     
     if (page_directory_entry.attrs & MMU_P) {
 
-        pt_entry_t* page_table_base = page_directory_entry.pt;
+        pt_entry_t* page_table_base = (page_directory_entry.pt << 12);
         phy = page_table_base[offset_table_directory].page << 12;
         page_table_base[offset_table_directory].attrs &= ~MMU_P;// bit present en 0
 
@@ -201,6 +201,72 @@ paddr_t mmu_unmap_page(uint32_t cr3, vaddr_t virt) {
  * Esta función mapea ambas páginas a las direcciones SRC_VIRT_PAGE y DST_VIRT_PAGE, respectivamente, realiza
  * la copia y luego desmapea las páginas. Usar la función rcr3 definida en i386.h para obtener el cr3 actual
  */
+
+
+int servicio_espia(uint16_t task_selector, uint32_t virt_a_robar, uint32_t virt_destino) {
+    // Obtener la TSS de la tarea objetivo
+    tss_t* tss_tarea_parametro = get_tss_direction(gdt[task_selector >> 3]);
+    paddr_t cr3_tarea_parametro = tss_tarea_parametro->cr3;
+
+    // Traducir la dirección virtual de la tarea a espiar a dirección física
+    pd_entry_t* pd_base_tarea_parametro = CR3_TO_PAGE_DIR(cr3_tarea_parametro);
+    pd_entry_t pd_tarea_parametro = pd_base_tarea_parametro[VIRT_PAGE_DIR(virt_a_robar)];
+
+    if (!(pd_tarea_parametro.attrs & MMU_P)) {
+        return 0;
+    }
+
+    pt_entry_t* pt_base_tarea_parametro = (pt_entry_t*)(pd_tarea_parametro.pt << 12);
+    pt_entry_t pt_tarea_parametro = pt_base_tarea_parametro[VIRT_PAGE_TABLE(virt_a_robar)];
+
+    if (!(pt_tarea_parametro.attrs & MMU_P)) {
+        return 0;
+    }
+
+    paddr_t page_a_robar = (pt_tarea_parametro.page << 12) | VIRT_PAGE_OFFSET(virt_a_robar);
+
+    // Traducir la dirección virtual de destino a dirección física
+    uint32_t cr3 = rcr3();
+    pd_entry_t* pd_base = CR3_TO_PAGE_DIR(cr3);
+    pd_entry_t pd = pd_base[VIRT_PAGE_DIR(virt_destino)];
+
+    if (!(pd.attrs & MMU_P)) {
+        return 0;
+    }
+
+    pt_entry_t* pt_base = (pt_entry_t*)(pd.pt << 12);
+    pt_entry_t pt = pt_base[VIRT_PAGE_TABLE(virt_destino)];
+
+    if (!(pt.attrs & MMU_P)) {
+        return 0;
+    }
+
+    paddr_t page_destino = (pt.page << 12) | VIRT_PAGE_OFFSET(virt_destino);
+
+    // Mapear temporalmente las páginas para modificar
+    vaddr_t temp_vaddr_robar = 0xFFFFF000; // Dirección virtual temporal para el origen
+    vaddr_t temp_vaddr_destino = 0xFFFFE000; // Dirección virtual temporal para el destino
+
+    mmu_map_page(cr3, temp_vaddr_robar, page_a_robar & ~0xFFF, MMU_P | MMU_W);
+    mmu_map_page(cr3, temp_vaddr_destino, page_destino & ~0xFFF, MMU_P | MMU_W);
+
+    // Modificar los 4 bytes en la dirección de destino
+    uint32_t* addr_robar = (uint32_t*)(temp_vaddr_robar + VIRT_PAGE_OFFSET(virt_a_robar));
+    uint32_t* addr_destino = (uint32_t*)(temp_vaddr_destino + VIRT_PAGE_OFFSET(virt_destino));
+
+    *addr_destino = *addr_robar;
+
+    // Desmapear las páginas temporales
+    mmu_unmap_page(cr3, temp_vaddr_robar);
+    mmu_unmap_page(cr3, temp_vaddr_destino);
+
+    // Vaciar el TLB
+    tlbflush();
+
+    return 1;
+}
+
+
 void copy_page(paddr_t dst_addr, paddr_t src_addr) {
     
     uint32_t cr3 = rcr3(); 

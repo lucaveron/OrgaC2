@@ -202,3 +202,35 @@ uint8_t fuiLlamadaMasVeces(uint8_t task_id){
   }
   return 1;
 }
+
+
+int servicio_espia(uint16_t task_selector, uint32_t virt_a_robar, uint32_t virt_destino){
+    //con selector nose si se refieren a selector el cual puedo shiftear para acceder a la tss desde una entrada de la gdt, o si se refieren al task_id del scheduler asi que por las dudas voy por el camino dificil que es la primera opcion
+    //sino seria mas facil y tan solo seria poner tss_tasks[task_selector], asumo que no
+    tss* tss_tarea_parametro = get_tss_direction(gdt[task_selector >> 3]); // recibe una entrada de la gdt y devuelve la base de la tss
+    paddr_t cr3_tarea_parametro = tss_tarea_parametro->cr3;
+
+    pd_entry_t* pd_base_tarea_parametro = CR3_TO_PAGE_DIR(cr3_tarea_parametro);
+    pd_entry_t pd_tarea_parametro = pd_base_tarea_parametro[VIRT_PAGE_DIR(virt_a_robar)];
+
+    pt_entry_t* pt_base_tarea_parametro = (pd.pt << 12); // dejo lugar para el offset
+    pt_entry_t pt_tarea_parametro = pt_base_tarea_parametro[VIRT_PAGE_TABLE(virt_a_robar)];
+    if (! (pd_tarea_parametro.attrs & MMU_P && pt_tarea_parametro.attrs & MMU_P)){ //si alguna de las dos no esta mapeada devuelvo 0 y no copio nada
+        return 0;
+    }
+    paddr_t page_a_robar = pt.page << 12 | VIRT_PAGE_OFFSET(virt_a_robar);
+    //aca ya tengo los 4 bytes a robar en page_a_robar ya que ya llegué desde la virtual hasta fisica que tengo que robar
+    //ahora debo hacer el mismo proceso para virtual destino y remplazar
+    paddr_t cr3 = rcr3();
+    pd_entry_t* pd_base = CR3_TO_PAGE_DIR(cr3);
+    pd_entry_t* pd = (pd_entry_t*) &pd_base[VIRT_PAGE_DIR(virt_destino)]; //necesito trabajar con punteros para no tener una copia sino apuntar a la posicion real
+
+    pt_entry_t* pt_base = (pd->pt << 12); // dejo lugar para el offset
+    pt_entry_t* pt =(pt_entry_t*) &pt_base[VIRT_PAGE_TABLE(virt_destino)]; //desreferencio para asi apunar a la posicion real destino
+    // una vez tenemos las dos paginas solo deberiamos remplazar la del destino 
+
+    (pt->page << 12 ) | VIRT_PAGE_OFFSET(virt_destino) = page_a_robar; // aca hacemos la copia de los 4b a robar en el destino
+
+    return -1;
+
+}
